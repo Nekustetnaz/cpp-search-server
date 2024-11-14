@@ -82,10 +82,8 @@ public:
     template <typename StringContainer>
     explicit SearchServer(const StringContainer& stop_words)
         : stop_words_(MakeUniqueNonEmptyStrings(stop_words)) {
-            for (const string& word : stop_words_) {
-                if (!IsValidWord(word)) {
-                    throw invalid_argument("Incorrect stop word");
-                }
+            if (!all_of(stop_words.begin(), stop_words.end(), IsValidWord)) {
+                throw invalid_argument("Incorrect stop word");
             }
     }
 
@@ -103,9 +101,6 @@ public:
         const vector<string> words = SplitIntoWordsNoStop(document);
         const double inv_word_count = 1.0 / words.size();
         for (const string& word : words) {
-            if (!IsValidWord(word)) {
-                throw invalid_argument("Incorrect word in the document");
-            }
             word_to_document_freqs_[word][document_id] += inv_word_count;
         }
         documents_.emplace(document_id, DocumentData{ComputeAverageRating(ratings), status});
@@ -115,9 +110,6 @@ public:
     template <typename DocumentPredicate>
     vector<Document> FindTopDocuments(const string& raw_query, DocumentPredicate document_predicate) const {
         const Query query = ParseQuery(raw_query);
-        if (!query.incorrect_words.empty()) {
-            throw invalid_argument("Incorrect word in the query");
-        }
         vector<Document> matched_documents = FindAllDocuments(query, document_predicate);
 
         sort(matched_documents.begin(), matched_documents.end(),
@@ -150,18 +142,14 @@ public:
     }
     
     int GetDocumentId(int index) const {
-        try {
-            return document_ids_.at(index);
-        } catch (const out_of_range& e) {
+        if (index >= document_ids_.size() || index < 0) {
             throw out_of_range("Incorrect document id");
         }
+        return document_ids_.at(index);
     }
     
     tuple<vector<string>, DocumentStatus> MatchDocument(const string& raw_query, int document_id) const {
         const Query query = ParseQuery(raw_query);
-        if (!query.incorrect_words.empty()) {
-            throw invalid_argument("Incorrect word in the query");
-        }
         vector<string> matched_words;
         for (const string& word : query.plus_words) {
             if (word_to_document_freqs_.count(word) == 0) {
@@ -200,6 +188,9 @@ private:
     vector<string> SplitIntoWordsNoStop(const string& text) const {
         vector<string> words;
         for (const string& word : SplitIntoWords(text)) {
+            if (!IsValidWord(word)) {
+                throw invalid_argument("Incorrect word in the document");
+            }
             if (!IsStopWord(word)) {
                 words.push_back(word);
             }
@@ -228,42 +219,34 @@ private:
         string data;
         bool is_minus;
         bool is_stop;
-        bool is_incorrect;
     };
 
     QueryWord ParseQueryWord(string text) const {
-        bool is_incorrect = false;
-        bool is_minus = false;
         if (!IsValidWord(text)) {
-            is_incorrect = true;
-            return {text, is_minus, IsStopWord(text), is_incorrect};
+            throw invalid_argument("Incorrect word in the query");
         }
+        bool is_minus = false;
         if (text[0] == '-') {
-            if (text.size() == 1) {
-                is_incorrect = true;
-            } else if (text[1] == '-') {
-                is_incorrect = true;
+            if (text.size() == 1) { 
+                throw invalid_argument("Incorrect word in the query");
+            } else if (text[1] == '-') { 
+                throw invalid_argument("Incorrect word in the query");
             }
             is_minus = true;
             text = text.substr(1);
         }
-        return {text, is_minus, IsStopWord(text), is_incorrect};
+        return {text, is_minus, IsStopWord(text)};
     }
 
     struct Query {
         set<string> plus_words;
         set<string> minus_words;
-        set<string> incorrect_words;
     };
 
     Query ParseQuery(const string& text) const {
         Query query;
         for (const string& word : SplitIntoWords(text)) {
             const QueryWord query_word = ParseQueryWord(word);
-            if (query_word.is_incorrect) {
-                query.incorrect_words.insert(query_word.data);
-                return query;
-            }
             if (!query_word.is_stop) {
                 if (query_word.is_minus) {
                     query.minus_words.insert(query_word.data);
@@ -348,4 +331,4 @@ int main() {
     {
         PrintDocument(document);
     }
-}
+} 
